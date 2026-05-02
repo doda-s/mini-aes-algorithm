@@ -1,3 +1,5 @@
+# State
+
 A forma como organizamos os dados é crucial, pois todas as operações subsequentes (troca de nibbles, rotação de linhas e mistura de colunas) dependem da posição geométrica desses bits.
 
 Para entender o State (Estado), imagine que você tem uma entrada de 16 bits. O algoritmo não olha para eles como uma linha única, mas sim como uma matriz quadrada.
