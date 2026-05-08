@@ -300,7 +300,7 @@ func invMixColumns(s State) State {
 //
 // Por que expandir a chave?
 // - Cada round precisa de uma chave diferente para ser seguro
-// - Se usássemos a mesma chave em todos os rounds, haveria padrões exploráveis
+// - Se usássemos a mesma chave em todos os `s, haveria padrões exploráveis
 // - A expansão garante que uma pequena mudança na chave original
 //   produza sub-chaves muito diferentes (efeito avalanche na chave)
 //
@@ -315,6 +315,7 @@ func invMixColumns(s State) State {
 // rcon são as constantes de round em GF(2^4): 2^0=1, 2^1=2, 2^2=4
 var rcon = [3]uint8{0x1, 0x2, 0x4}
 
+// TODO: ENTENDER MELHOR ESTA PARTE
 // keyExpansion gera as 3 sub-chaves a partir da chave original
 func keyExpansion(key uint16) [3]uint16 {
 	keys := [3]uint16{}
@@ -372,6 +373,7 @@ func encrypt(plaintext, key uint16, verbose bool) uint16 {
 	// Gera as 3 sub-chaves para os 3 rounds
 	keys := keyExpansion(key)
 
+	// TODO: REMOVÍVEL
 	if verbose {
 		fmt.Printf("\n%s\n", strings.Repeat("=", 60))
 		fmt.Println("  PROCESSO DE ENCRIPTAÇÃO")
@@ -385,16 +387,13 @@ func encrypt(plaintext, key uint16, verbose bool) uint16 {
 	}
 
 	// Converte o bloco para a representação matricial
+	// TODO: BUSCAR EXPLICACAO MELHOR PARA ESTE TRECHO
 	state := blockToState(plaintext)
 	if verbose {
 		fmt.Println("\n--- Estado Inicial ---")
 		printState(state, "Texto Plano")
 	}
 
-	// -------------------------------------------------------------------------
-	// ROUND 0: Apenas AddRoundKey com a chave original
-	// Sem este passo, o atacante poderia "pular" o primeiro round
-	// -------------------------------------------------------------------------
 	state = addRoundKey(state, keys[0])
 	if verbose {
 		fmt.Println("\n--- Round 0: AddRoundKey(K0) ---")
@@ -402,60 +401,32 @@ func encrypt(plaintext, key uint16, verbose bool) uint16 {
 		printState(state, "Após AddRoundKey(K0)")
 	}
 
-	// -------------------------------------------------------------------------
-	// ROUND 1: Round Completo
-	// -------------------------------------------------------------------------
-	if verbose {
-		fmt.Println("\n--- Round 1: Round Completo ---")
-	}
+	totalRounds := 2
 
-	// SubNibbles: Confusão - substitui cada nibble via S-Box
-	state = subNibbles(state)
-	if verbose {
-		printState(state, "Após SubNibbles")
-	}
+	for i := 0; i < totalRounds; i++ {
+		state = subNibbles(state)
+		if verbose {
+			printState(state, "Após SubNibbles")
+		}
 
-	// ShiftRows: Difusão horizontal - rotaciona as linhas
-	state = shiftRows(state)
-	if verbose {
-		printState(state, "Após ShiftRows")
-	}
+		state = shiftRows(state)
+		if verbose {
+			printState(state, "Após ShiftRows")
+		}
 
-	// MixColumns: Difusão vertical - mistura as colunas em GF(2^4)
-	state = mixColumns(state)
-	if verbose {
-		printState(state, "Após MixColumns")
-	}
+		// Não executar no último round
+		if i < totalRounds-1 {
+			state = mixColumns(state)
+			if verbose {
+				printState(state, "Após MixColumns")
+			}
+		}
 
-	// AddRoundKey com a segunda sub-chave
-	state = addRoundKey(state, keys[1])
-	if verbose {
-		fmt.Printf("  XOR com K1 = 0x%04X\n", keys[1])
-		printState(state, "Após AddRoundKey(K1)")
-	}
-
-	// -------------------------------------------------------------------------
-	// ROUND 2: Round Final (sem MixColumns)
-	// O último round omite MixColumns por convenção do AES
-	// -------------------------------------------------------------------------
-	if verbose {
-		fmt.Println("\n--- Round 2: Round Final (sem MixColumns) ---")
-	}
-
-	state = subNibbles(state)
-	if verbose {
-		printState(state, "Após SubNibbles")
-	}
-
-	state = shiftRows(state)
-	if verbose {
-		printState(state, "Após ShiftRows")
-	}
-
-	state = addRoundKey(state, keys[2])
-	if verbose {
-		fmt.Printf("  XOR com K2 = 0x%04X\n", keys[2])
-		printState(state, "Após AddRoundKey(K2)")
+		state = addRoundKey(state, keys[i+1])
+		if verbose {
+			fmt.Printf("  XOR com K%d = 0x%04X\n", i+1, keys[i+1])
+			printState(state, "Após AddRoundKey")
+		}
 	}
 
 	// Converte o estado final de volta para 16 bits
@@ -505,50 +476,38 @@ func decrypt(ciphertext, key uint16, verbose bool) uint16 {
 	// INVERSO DO ROUND 2: AddRoundKey → InvShiftRows → InvSubNibbles
 	// Aplicamos as operações inversas na ordem inversa
 	// -------------------------------------------------------------------------
-	if verbose {
-		fmt.Println("\n--- Inverso do Round 2 ---")
-	}
 
-	state = addRoundKey(state, keys[2]) // AddRoundKey é auto-inverso!
-	if verbose {
-		printState(state, "Após AddRoundKey(K2)")
-	}
+	for round := 2; round >= 1; round-- {
 
-	state = invShiftRows(state)
-	if verbose {
-		printState(state, "Após InvShiftRows")
-	}
+		if verbose {
+			fmt.Printf("\n--- Inverso do Round %d ---\n", round)
+		}
 
-	state = invSubNibbles(state)
-	if verbose {
-		printState(state, "Após InvSubNibbles")
-	}
+		// AddRoundKey
+		state = addRoundKey(state, keys[round])
+		if verbose {
+			printState(state, fmt.Sprintf("Após AddRoundKey(K%d)", round))
+		}
 
-	// -------------------------------------------------------------------------
-	// INVERSO DO ROUND 1: AddRoundKey → InvMixColumns → InvShiftRows → InvSubNibbles
-	// -------------------------------------------------------------------------
-	if verbose {
-		fmt.Println("\n--- Inverso do Round 1 ---")
-	}
+		// InvMixColumns (não acontece no último round)
+		if round != 2 {
+			state = invMixColumns(state)
+			if verbose {
+				printState(state, "Após InvMixColumns")
+			}
+		}
 
-	state = addRoundKey(state, keys[1])
-	if verbose {
-		printState(state, "Após AddRoundKey(K1)")
-	}
+		// InvShiftRows
+		state = invShiftRows(state)
+		if verbose {
+			printState(state, "Após InvShiftRows")
+		}
 
-	state = invMixColumns(state)
-	if verbose {
-		printState(state, "Após InvMixColumns")
-	}
-
-	state = invShiftRows(state)
-	if verbose {
-		printState(state, "Após InvShiftRows")
-	}
-
-	state = invSubNibbles(state)
-	if verbose {
-		printState(state, "Após InvSubNibbles")
+		// InvSubNibbles
+		state = invSubNibbles(state)
+		if verbose {
+			printState(state, "Após InvSubNibbles")
+		}
 	}
 
 	// -------------------------------------------------------------------------
@@ -608,7 +567,7 @@ func main() {
 	fmt.Println()
 	fmt.Println("╔══════════════════════════════════════════════════════════╗")
 	fmt.Println("║          MINI AES DE 16 BITS - Trabalho Acadêmico        ║")
-	fmt.Println("║     Implementação Educacional com Passos Explicados       ║")
+	fmt.Println("║     Implementação Educacional com Passos Explicados      ║")
 	fmt.Println("╚══════════════════════════════════════════════════════════╝")
 
 	// Valores de exemplo
@@ -666,11 +625,11 @@ func main() {
 	// TESTE COM MÚLTIPLOS VALORES
 	// =========================================================================
 	fmt.Println()
-	fmt.Println("╔══════════════════════════════════════════════════════════╗")
-	fmt.Println("║               TESTES COM MÚLTIPLOS VALORES               ║")
-	fmt.Println("╠════════════════╦══════════╦══════════╦════════════════╦══╣")
-	fmt.Println("║  Texto Plano   ║  Chave   ║  Cifrado ║  Recuperado    ║ OK║")
-	fmt.Println("╠════════════════╬══════════╬══════════╬════════════════╬══╣")
+	fmt.Println("╔═══════════════════════════════════════════════════════════╗")
+	fmt.Println("║               TESTES COM MÚLTIPLOS VALORES                ║")
+	fmt.Println("╠════════════════╦══════════╦══════════╦════════════════╦═══╣")
+	fmt.Println("║  Texto Plano   ║  Chave   ║  Cifrado ║  Recuperado    ║OK ║")
+	fmt.Println("╠════════════════╬══════════╬══════════╬════════════════╬═══╣")
 
 	testCases := [][2]uint16{
 		{0x1234, 0xABCD},
@@ -691,5 +650,5 @@ func main() {
 		fmt.Printf("║  0x%04X        ║  0x%04X  ║  0x%04X  ║  0x%04X        ║ %s ║\n",
 			pt, k, ct, rec, status)
 	}
-	fmt.Println("╚════════════════╩══════════╩══════════╩════════════════╩══╝")
+	fmt.Println("╚════════════════╩══════════╩══════════╩════════════════╩═══╝")
 }
